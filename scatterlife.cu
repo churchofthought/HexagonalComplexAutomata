@@ -6,6 +6,8 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
+#include <cuComplex.h>
+
 #include "scatterlife.h" 
 
 
@@ -47,7 +49,7 @@ __device__ Universe univ2 = {};
 
 __device__ UniImg raster = {};
 
-__device__ volatile unsigned int gTime = 1; 
+//__device__ volatile unsigned int gTime = 1; 
 
 //__device__ volatile unsigned int maxParticleCount = 0;
 
@@ -82,7 +84,8 @@ __global__ void runAutomata(bool direction){
   unsigned int x = blockIdx.x;
   unsigned int y = blockIdx.y;
 
-  unsigned int seed = gTime; //+ x + y + x*y + y*x*x+ y*y*x;
+
+
 
   unsigned int xm1 = x >= 1 ? x-1 : (UNIVERSE_WIDTH - 1);
   unsigned int xp1 = x < (UNIVERSE_WIDTH - 1) ? x+1 : 0;
@@ -90,134 +93,87 @@ __global__ void runAutomata(bool direction){
   unsigned int ym1 = y >= 1 ? y-1 : (UNIVERSE_HEIGHT - 1);
   unsigned int yp1 = y < (UNIVERSE_HEIGHT - 1) ? y+1 : 0;
 
+  cuFloatComplex z = (*origin)[x][y];
 
-  unsigned int incoming[6] = {
-    (*origin)   [x] [ym1]  .unbound[0],   
-    (*origin) [xp1] [ym1]  .unbound[1],
-    (*origin) [xp1]   [y]  .unbound[2],   
-    (*origin)   [x] [yp1]  .unbound[3],   
-    (*origin) [xm1] [yp1]  .unbound[4], 
-    (*origin) [xm1]   [y]  .unbound[5]   
-  };
-
-  //this_grid().sync();
-
-  unsigned int triforce_a = min(min(incoming[0], incoming[2]), incoming[4]);
-  unsigned int triforce_b = min(min(incoming[1], incoming[3]), incoming[5]);
-
-  unsigned int pair_a = min(incoming[0], incoming[3]);
-  unsigned int pair_b = min(incoming[1], incoming[4]);
-  unsigned int pair_c = min(incoming[2], incoming[5]);
-  
-  unsigned int pairTriforceOverlap = min( 
-    max(max(pair_a, pair_b), pair_c),
-    max(triforce_a, triforce_b)
-  );
-
-  unsigned int pairsKept = seed % (pairTriforceOverlap + 1);
-  unsigned int triforcesKept = pairTriforceOverlap - pairsKept;
-
-  pair_a -= min(pair_a, triforcesKept);
-  pair_b -= min(pair_b, triforcesKept);
-  pair_c -= min(pair_c, triforcesKept);
-
-  unsigned int final_pairs = pair_a + pair_b + pair_c;
-
-  triforce_a -= min(triforce_a, pairsKept);
-  triforce_b -= min(triforce_b, pairsKept);
-
-
-  unsigned int final_triforces = triforce_a + triforce_b;
-  
-
-  
-
-  unsigned int triforce_cut = seed % (final_triforces + 1);
-
-  unsigned int final_triforce_a = triforce_cut;
-  unsigned int final_triforce_b = final_triforces - triforce_cut;
-
-  // ordered pairing function
-  unsigned int z = seed % (
-     (final_pairs + 1)*(final_pairs + 2)/2
-  );
-
-  unsigned int w = (sqrtf(8*z + 1) - 1) / 2;
-  unsigned int pair_cut_1 = z - w*(w+1)/2;
-  unsigned int pair_cut_2 = w;
-
-  unsigned int final_pair_a = pair_cut_1;
-  unsigned int final_pair_b = pair_cut_2 - pair_cut_1;
-  unsigned int final_pair_c = final_pairs - pair_cut_2;
-
-
-
-  unsigned int scattering[6] = {
-    final_triforce_a + final_pair_a,
-    final_triforce_b + final_pair_b,
-    final_triforce_a + final_pair_c,
-    final_triforce_b + final_pair_a,
-    final_triforce_a + final_pair_b,
-    final_triforce_b + final_pair_c
+  cuFloatComplex neighborhood[6] = {
+    (*origin)   [x] [ym1],   
+    (*origin) [xp1] [ym1],
+    (*origin) [xp1]   [y],   
+    (*origin)   [x] [yp1],   
+    (*origin) [xm1] [yp1], 
+    (*origin) [xm1]   [y]
   };
 
 
+  cuFloatComplex tot = cuCaddf(
+                        cuCaddf(
+                          cuCaddf(neighborhood[0], neighborhood[1]),
+                          cuCaddf(neighborhood[2], neighborhood[3])
+                        ),
+                        cuCaddf(neighborhood[4], neighborhood[5])
+                      );
+
+  cuFloatComplex res = cuCmulf(z, tot);
+  res = cuCdivf(res, make_cuFloatComplex(cuCabsf(res), 0));
+  (*target)[x][y] = res;
+}
 
 
-  
 
-  
-  (*target)[x][y] = {
-    scattering[0],
-    scattering[1],
-    scattering[2],
-    scattering[3],
-    scattering[4],
-    scattering[5],
-    (*origin)[x][y].bound[0] + incoming[0] - triforce_a - pair_a,
-    (*origin)[x][y].bound[1] + incoming[1] - triforce_b - pair_b,
-    (*origin)[x][y].bound[2] + incoming[2] - triforce_a - pair_c,
-    (*origin)[x][y].bound[3] + incoming[3] - triforce_b - pair_a,
-    (*origin)[x][y].bound[4] + incoming[4] - triforce_a - pair_b,
-    (*origin)[x][y].bound[5] + incoming[5] - triforce_b - pair_c,
-  };
 
-  if (blockIdx.x == 0){
-    gTime = (48271 * gTime) % (2147483647);
+__device__ float HueToRGB(float v1, float v2, float vH)
+{
+  if (vH < 0)
+    vH += 1;
+
+  if (vH > 1)
+    vH -= 1;
+
+  if ((6 * vH) < 1)
+    return (v1 + (v2 - v1) * 6 * vH);
+
+  if ((2 * vH) < 1)
+    return v2;
+
+  if ((3 * vH) < 2)
+    return (v1 + (v2 - v1) * ((2.0f / 3) - vH) * 6);
+
+  return v1;
+}
+
+__device__ struct RGB HSLToRGB(struct HSL hsl) {
+  struct RGB rgb;
+
+  if (hsl.S == 0)
+  {
+    rgb.R = rgb.G = rgb.B = hsl.L;
   }
+  else
+  {
+    float v1, v2;
+
+    v2 = (hsl.L < 0.5) ? (hsl.L * (1 + hsl.S)) : ((hsl.L + hsl.S) - (hsl.L * hsl.S));
+    v1 = 2 * hsl.L - v2;
+
+    rgb.R = HueToRGB(v1, v2, hsl.H + (1.0f / 3));
+    rgb.G = HueToRGB(v1, v2, hsl.H);
+    rgb.B = HueToRGB(v1, v2, hsl.H - (1.0f / 3));
+  }
+
+  return rgb;
 }
 
 __global__ void rasterizeAutomata(){
   unsigned int x = blockIdx.x;
   unsigned int y = blockIdx.y;
 
-  // if (blockIdx.x == 0){
-  //   maxParticleCount = 0;
-  // }
+  cuFloatComplex z = univ[x][y];
 
-  // unsigned int pc = (
-  //     univ[x][y].bound[0] + univ[x][y].unbound[0]
-  //   + univ[x][y].bound[1] + univ[x][y].unbound[1]
-  //   + univ[x][y].bound[2] + univ[x][y].unbound[2]
-  //   + univ[x][y].bound[3] + univ[x][y].unbound[3]
-  //   + univ[x][y].bound[4] + univ[x][y].unbound[4]
-  //   + univ[x][y].bound[5] + univ[x][y].unbound[5]
-  // );
-
-  //atomicMax((unsigned int*) &maxParticleCount, pc);
-
-  //this_grid().sync();
-
-  //AAGGBBRR
-  raster[x][y] = 
-      univ[x][y].bound[0] || univ[x][y].unbound[0]
-    || univ[x][y].bound[1] || univ[x][y].unbound[1]
-    || univ[x][y].bound[2] || univ[x][y].unbound[2]
-    || univ[x][y].bound[3] || univ[x][y].unbound[3]
-    || univ[x][y].bound[4] || univ[x][y].unbound[4]
-    || univ[x][y].bound[5] || univ[x][y].unbound[5] ? 0xFF000000 : 0xFFFFFFFF;
-
-  //(unsigned int)(16777215.0 * powf(pc / maxParticleCount, 0.2)) | 0xFF000000;
+  raster[x][y] = HSLToRGB({
+    cuCabsf(z), 
+    1.0f, 
+    (1.0f + atan2f(cuCimagf(z), cuCrealf(z)) / (3.141592654f)) / 2.0f
+  });
 }
 
 
@@ -246,14 +202,14 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 
 
-void dump_univ(){
-  for (int i = 0; i < UNIVERSE_WIDTH; ++i){
-    for (int z = 0; z < UNIVERSE_HEIGHT; ++z){
-      printf("%3d", host_raster[i][z]);
-    }
-    printf("\n");
-  }
-}
+// void dump_univ(){
+//   for (int i = 0; i < UNIVERSE_WIDTH; ++i){
+//     for (int z = 0; z < UNIVERSE_HEIGHT; ++z){
+//       printf("%3d", host_raster[i][z]);
+//     }
+//     printf("\n");
+//   }
+// }
 
 
 void initOpenGL(){
@@ -318,7 +274,7 @@ DWORD WINAPI render( LPVOID lpParam ) {
   cudaSetDevice(0);
   initOpenGL();
 
-  float scale = 0.7f;
+  float scale = 0.5f;
 
 
   /* Loop until the user closes the window */
@@ -334,7 +290,7 @@ DWORD WINAPI render( LPVOID lpParam ) {
 
       //glClear(GL_COLOR_BUFFER_BIT);
       
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, RASTER_WIDTH, RASTER_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, host_raster);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, RASTER_WIDTH, RASTER_HEIGHT, 0, GL_RGB, GL_FLOAT, host_raster);
       //glGenerateTextureMipmap(rasterTexture);
 
       glBegin(GL_TRIANGLE_STRIP);
@@ -354,6 +310,8 @@ DWORD WINAPI render( LPVOID lpParam ) {
   exit(0);
 }
 
+#define RAND_FLOAT ((float)rand()/(float)(RAND_MAX/1.0f))
+
 
 int main(int argc, char **argv)
 {
@@ -364,13 +322,14 @@ int main(int argc, char **argv)
   cudaSetDevice(0);
   CreateThread(NULL, 0, render, NULL, 0, NULL);
 
-  //initialize INITIAL_PARTICLE_COUNT heading to center cell from every neighbor
-  host_univ[UNIVERSE_WIDTH/2][UNIVERSE_HEIGHT/2-1].unbound[0] = INITIAL_PARTICLE_COUNT;
-  host_univ[UNIVERSE_WIDTH/2+1][UNIVERSE_HEIGHT/2-1].unbound[1] = INITIAL_PARTICLE_COUNT;
-  host_univ[UNIVERSE_WIDTH/2+1][UNIVERSE_HEIGHT/2].unbound[2] = INITIAL_PARTICLE_COUNT;
-  host_univ[UNIVERSE_WIDTH/2][UNIVERSE_HEIGHT/2+1].unbound[3] = INITIAL_PARTICLE_COUNT;
-  host_univ[UNIVERSE_WIDTH/2-1][UNIVERSE_HEIGHT/2+1].unbound[4] = INITIAL_PARTICLE_COUNT;
-  host_univ[UNIVERSE_WIDTH/2-1][UNIVERSE_HEIGHT/2].unbound[5] = INITIAL_PARTICLE_COUNT;
+  //initialize automata
+  for (int x = 0; x < UNIVERSE_WIDTH; ++x){
+    for (int y = 0; y < UNIVERSE_HEIGHT; ++y){
+      host_univ[x][y] = make_cuFloatComplex(RAND_FLOAT, RAND_FLOAT);
+    }
+  }
+  
+  //host_univ[UNIVERSE_WIDTH/2][UNIVERSE_HEIGHT/2] = make_cuFloatComplex(1.0, 1.0);
 
   cudaMemcpyToSymbol(univ, host_univ, sizeof(Universe), 0, cudaMemcpyHostToDevice);
 
