@@ -1,10 +1,9 @@
 
-#define UNIVERSE_WIDTH 2*7*7*7
-#define UNIVERSE_HEIGHT 2*7*7*7
+#define UNIVERSE_WIDTH 512
+#define UNIVERSE_HEIGHT 512
 
-typedef cuFloatComplex Cell;
-
-typedef cuFloatComplex Universe[UNIVERSE_WIDTH][UNIVERSE_HEIGHT];
+typedef float UniverseDevice[UNIVERSE_WIDTH][UNIVERSE_HEIGHT][2];
+typedef thrust::complex<float> Universe[UNIVERSE_WIDTH][UNIVERSE_HEIGHT];
 
 struct RGB
 {

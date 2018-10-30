@@ -6,7 +6,12 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 
-#include <cuComplex.h>
+
+#define _USE_MATH_DEFINES // for C  
+#include <math.h>  
+
+#include <thrust/complex.h>
+
 
 #include "scatterlife.h" 
 
@@ -43,15 +48,15 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 
 
 
-__device__ Universe univ = {};
-__device__ Universe univ2 = {};
+__device__ UniverseDevice univ = {};
+__device__ UniverseDevice univ2 = {};
 
 
 __device__ UniImg raster = {};
 
 //__device__ volatile unsigned int gTime = 1; 
 
-//__device__ volatile unsigned int maxParticleCount = 0;
+__device__ volatile float maxVal;
 
 
 Universe host_univ = {};
@@ -74,11 +79,11 @@ __global__ void runAutomata(bool direction){
   Universe* origin;
   Universe* target;
   if (direction){
-    origin = &univ;
-    target = &univ2;
+    origin = (Universe*)(&univ);
+    target = (Universe*)(&univ2);
   }else{
-    origin = &univ2;
-    target = &univ;
+    origin = (Universe*)(&univ2);
+    target = (Universe*)(&univ);
   }
 
   unsigned int x = blockIdx.x;
@@ -87,15 +92,15 @@ __global__ void runAutomata(bool direction){
 
 
 
-  unsigned int xm1 = x >= 1 ? x-1 : (UNIVERSE_WIDTH - 1);
-  unsigned int xp1 = x < (UNIVERSE_WIDTH - 1) ? x+1 : 0;
+  unsigned int xm1 = x == 0 ? (UNIVERSE_WIDTH - 1) : x-1;
+  unsigned int xp1 = x == (UNIVERSE_WIDTH - 1) ? 0 : x+1;
 
-  unsigned int ym1 = y >= 1 ? y-1 : (UNIVERSE_HEIGHT - 1);
-  unsigned int yp1 = y < (UNIVERSE_HEIGHT - 1) ? y+1 : 0;
+  unsigned int ym1 = y == 0 ? (UNIVERSE_HEIGHT - 1) : y-1;
+  unsigned int yp1 = y == (UNIVERSE_HEIGHT - 1) ? 0 : y+1;
 
-  cuFloatComplex z = (*origin)[x][y];
+  thrust::complex<float> z = (*origin)[x][y];
 
-  cuFloatComplex neighborhood[6] = {
+  thrust::complex<float> neighborhood[6] = {
     (*origin)   [x] [ym1],   
     (*origin) [xp1] [ym1],
     (*origin) [xp1]   [y],   
@@ -104,18 +109,12 @@ __global__ void runAutomata(bool direction){
     (*origin) [xm1]   [y]
   };
 
-
-  cuFloatComplex tot = cuCaddf(
-                        cuCaddf(
-                          cuCaddf(neighborhood[0], neighborhood[1]),
-                          cuCaddf(neighborhood[2], neighborhood[3])
-                        ),
-                        cuCaddf(neighborhood[4], neighborhood[5])
-                      );
-
-  cuFloatComplex res = cuCmulf(z, tot);
-  res = cuCdivf(res, make_cuFloatComplex(cuCabsf(res), 0));
-  (*target)[x][y] = res;
+  (*target)[x][y] = z + 0.01f * (neighborhood[0] + 
+                            neighborhood[1] +
+                            neighborhood[2] +
+                            neighborhood[3] +
+                            neighborhood[4] +
+                            neighborhood[5] - 6 * z);
 }
 
 
@@ -123,20 +122,20 @@ __global__ void runAutomata(bool direction){
 
 __device__ float HueToRGB(float v1, float v2, float vH)
 {
-  if (vH < 0)
-    vH += 1;
+  if (vH < 0.0f)
+    vH += 1.0f;
 
-  if (vH > 1)
-    vH -= 1;
+  if (vH > 1.0f)
+    vH -= 1.0f;
 
-  if ((6 * vH) < 1)
+  if ((6.0f * vH) < 1.0f)
     return (v1 + (v2 - v1) * 6 * vH);
 
-  if ((2 * vH) < 1)
+  if ((2.0f * vH) < 1.0f)
     return v2;
 
-  if ((3 * vH) < 2)
-    return (v1 + (v2 - v1) * ((2.0f / 3) - vH) * 6);
+  if ((3.0f * vH) < 2.0f)
+    return (v1 + (v2 - v1) * ((2.0f / 3.0f) - vH) * 6.0f);
 
   return v1;
 }
@@ -144,7 +143,7 @@ __device__ float HueToRGB(float v1, float v2, float vH)
 __device__ struct RGB HSLToRGB(struct HSL hsl) {
   struct RGB rgb;
 
-  if (hsl.S == 0)
+  if (hsl.S == 0.0f)
   {
     rgb.R = rgb.G = rgb.B = hsl.L;
   }
@@ -152,29 +151,42 @@ __device__ struct RGB HSLToRGB(struct HSL hsl) {
   {
     float v1, v2;
 
-    v2 = (hsl.L < 0.5) ? (hsl.L * (1 + hsl.S)) : ((hsl.L + hsl.S) - (hsl.L * hsl.S));
-    v1 = 2 * hsl.L - v2;
+    v2 = (hsl.L < 0.5f) ? (hsl.L * (1.0f + hsl.S)) : ((hsl.L + hsl.S) - (hsl.L * hsl.S));
+    v1 = 2.0f * hsl.L - v2;
 
-    rgb.R = HueToRGB(v1, v2, hsl.H + (1.0f / 3));
+    rgb.R = HueToRGB(v1, v2, hsl.H + (1.0f / 3.0f));
     rgb.G = HueToRGB(v1, v2, hsl.H);
-    rgb.B = HueToRGB(v1, v2, hsl.H - (1.0f / 3));
+    rgb.B = HueToRGB(v1, v2, hsl.H - (1.0f / 3.0f));
   }
 
   return rgb;
 }
 
-__global__ void rasterizeAutomata(){
+
+
+__global__ void rasterizeAutomata1(){
+  atomicMax((unsigned int*) &maxVal, __float_as_uint(
+      thrust::abs(
+      ((Universe&)univ)[blockIdx.x][blockIdx.y]
+    )
+  ));
+}
+
+__global__ void rasterizeAutomata2(){
   unsigned int x = blockIdx.x;
   unsigned int y = blockIdx.y;
 
-  cuFloatComplex z = univ[x][y];
+  thrust::complex<float> z = ((Universe&)univ)[x][y];
 
   raster[x][y] = HSLToRGB({
-    cuCabsf(z), 
+    0.5f + thrust::arg(z) / float(M_PI_2),
     1.0f, 
-    (1.0f + atan2f(cuCimagf(z), cuCrealf(z)) / (3.141592654f)) / 2.0f
+    1.0f - powf(thrust::abs(z) / maxVal, 0.5f)
   });
 }
+
+
+
 
 
 
@@ -202,15 +214,22 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 
 
-// void dump_univ(){
-//   for (int i = 0; i < UNIVERSE_WIDTH; ++i){
-//     for (int z = 0; z < UNIVERSE_HEIGHT; ++z){
-//       printf("%3d", host_raster[i][z]);
-//     }
-//     printf("\n");
-//   }
-// }
+void dump_univ(){
+  cudaMemcpyFromSymbol(host_univ, univ, sizeof(Universe), 0, cudaMemcpyDeviceToHost);
+  for (int i = 0; i < UNIVERSE_WIDTH; ++i){
+    for (int z = 0; z < UNIVERSE_HEIGHT; ++z){
+      printf("(%.2f, %.2f)", host_univ[i][z].real(), host_univ[i][z].imag());
+    }
+    printf("\n");
+  }
+}
 
+
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+    if (key == GLFW_KEY_D && (mods & GLFW_MOD_ALT) && action == GLFW_RELEASE)
+        dump_univ();
+}
 
 void initOpenGL(){
 
@@ -223,9 +242,12 @@ void initOpenGL(){
   // glfwWindowHint(GLFW_BLUE_BITS, mode->blueBits);
   // glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
 
-  window = glfwCreateWindow(UNIVERSE_WIDTH/2, UNIVERSE_HEIGHT/2, "ScatterLife", NULL, NULL);
-  //window = glfwCreateWindow(mode->width, mode->height, "ScatterLife", NULL, NULL);
+  int width = mode->width*.75;//UNIVERSE_WIDTH;
+  int height = mode->height*.75;//UNIVERSE_HEIGHT;
+  window = glfwCreateWindow(width, height, "ScatterLife", NULL, NULL);
+  glfwSetWindowPos(window, (mode->width - width) / 2, (mode->height - height) / 2);
 
+  glfwSetKeyCallback(window, key_callback);
   glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
 
   glfwMakeContextCurrent(window);
@@ -244,9 +266,9 @@ void initOpenGL(){
 
   // glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, 
-                 GL_NEAREST);
+                 GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, 
-                 GL_NEAREST);
+                 GL_LINEAR);
   GLfloat fLargest;
   glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &fLargest);
   glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, fLargest);
@@ -266,27 +288,60 @@ void initOpenGL(){
 }
 
 
-DWORD WINAPI render( LPVOID lpParam ) {
+
+int main(int argc, char **argv)
+{
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, 0);
   printf("  Device name: %s\n", prop.name);
 
   cudaSetDevice(0);
+
+  //initialize automata
+  for (int x = 0; x < UNIVERSE_WIDTH; ++x){
+    for (int y = 0; y < UNIVERSE_HEIGHT; ++y){
+      host_univ[x][y] = thrust::complex<float>( ( rand() / float(RAND_MAX) ) - 0.5f, ( rand() / float(RAND_MAX) ) - 0.5f);
+    }
+  }
+  
+  //host_univ[UNIVERSE_WIDTH/2][UNIVERSE_HEIGHT/2] = make_cuFloatComplex(1.0, 1.0);
+
+  cudaMemcpyToSymbol(univ, host_univ, sizeof(Universe), 0, cudaMemcpyHostToDevice);
+
+  
+  
+
+
+
   initOpenGL();
 
-  float scale = 0.5f;
+  float scale = 0.4f;
 
+  char title[128];
+  cudaEvent_t start, stop;
+  float milliseconds = 0;
+
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
 
   /* Loop until the user closes the window */
   while (!glfwWindowShouldClose(window))
   {
+      cudaEventRecord(start);
+      runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>(true);
+      runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>(false);
+      cudaEventRecord(stop);
+
       // rasterize
-      rasterizeAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1),0,cudaStreamPerThread>>>();
+      rasterizeAutomata1<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>();
+
+      // rasterize
+      rasterizeAutomata2<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>();
 
       // copy raster back to host
-      cudaMemcpyFromSymbolAsync(host_raster, raster, sizeof(UniImg), 0, cudaMemcpyDeviceToHost, cudaStreamPerThread);
+      cudaMemcpyFromSymbol(host_raster, raster, sizeof(UniImg), 0, cudaMemcpyDeviceToHost);
 
-      cudaStreamSynchronize(cudaStreamPerThread);
+      //cudaStreamSynchronize(cudaStreamPerThread);
 
       //glClear(GL_COLOR_BUFFER_BIT);
       
@@ -304,41 +359,14 @@ DWORD WINAPI render( LPVOID lpParam ) {
 
       glfwSwapBuffers(window);
 
+
+      cudaEventElapsedTime((float*)&milliseconds, start, stop);
+      sprintf(title, "%.2f executions per sec",  2000.0f / (float) milliseconds);
+
+      glfwSetWindowTitle(window, title);
+
       glfwPollEvents();
-  }
 
-  exit(0);
-}
-
-#define RAND_FLOAT ((float)rand()/(float)(RAND_MAX/1.0f))
-
-
-int main(int argc, char **argv)
-{
-  cudaDeviceProp prop;
-  cudaGetDeviceProperties(&prop, 0);
-  printf("  Device name: %s\n", prop.name);
-
-  cudaSetDevice(0);
-  CreateThread(NULL, 0, render, NULL, 0, NULL);
-
-  //initialize automata
-  for (int x = 0; x < UNIVERSE_WIDTH; ++x){
-    for (int y = 0; y < UNIVERSE_HEIGHT; ++y){
-      host_univ[x][y] = make_cuFloatComplex(RAND_FLOAT, RAND_FLOAT);
-    }
-  }
-  
-  //host_univ[UNIVERSE_WIDTH/2][UNIVERSE_HEIGHT/2] = make_cuFloatComplex(1.0, 1.0);
-
-  cudaMemcpyToSymbol(univ, host_univ, sizeof(Universe), 0, cudaMemcpyHostToDevice);
-
-  
-  for (;;){
-    // for (int i = 1; i--;){
-      runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1),0,cudaStreamPerThread >>>(true);
-      runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1),0,cudaStreamPerThread >>>(false);
-    // }
-    cudaStreamSynchronize(cudaStreamPerThread);
+      //Sleep(500);
   }
 }
