@@ -98,6 +98,7 @@ __global__ void runAutomata(bool direction){
   unsigned int ym1 = y == 0 ? (UNIVERSE_HEIGHT - 1) : y-1;
   unsigned int yp1 = y == (UNIVERSE_HEIGHT - 1) ? 0 : y+1;
 
+  thrust::complex<float> prevZ = (*target)[x][y];
   thrust::complex<float> z = (*origin)[x][y];
 
   thrust::complex<float> neighborhood[6] = {
@@ -109,12 +110,41 @@ __global__ void runAutomata(bool direction){
     (*origin) [xm1]   [y]
   };
 
-  (*target)[x][y] = z + 0.01f * (neighborhood[0] + 
-                            neighborhood[1] +
-                            neighborhood[2] +
-                            neighborhood[3] +
-                            neighborhood[4] +
-                            neighborhood[5] - 6 * z);
+  thrust::complex<float> unit_vectors[6] = {
+    thrust::complex<float>(0.0f, 1.0f),
+    thrust::complex<float>(sqrtf(3.0f)/2.0f, 1.0f/2.0f),
+    thrust::complex<float>(sqrtf(3.0f)/2.0f, -1.0f/2.0f),
+    thrust::complex<float>(0.0f, -1.0f),
+    thrust::complex<float>(-sqrtf(3.0f)/2.0f, -1.0f/2.0f),
+    thrust::complex<float>(-sqrtf(3.0f)/2.0f, 1.0f/2.0f)
+  };
+
+  thrust::complex<float> res = 0;
+
+  for (int i = 0; i < 5; ++i){
+    res += unit_vectors[i] * (4.0f/6.0f) * max(0.0f,
+      neighborhood[(i + 3) % 6].real() * unit_vectors[i].real() + 
+      neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
+    );
+  }
+  (*target)[x][y] = 0.5f * res + 0.5f * z;
+
+  // (*target)[x][y] = thrust::pow(z - prevZ, 2) + 0.01 *(neighborhood[0] + 
+  //                           neighborhood[1] +
+  //                           neighborhood[2] +
+  //                           neighborhood[3] +
+  //                           neighborhood[4] +
+  //                           neighborhood[5]
+  //                           - 6*z);
+
+  // (*target)[x][y] = (
+  //   neighborhood[0] + 
+  //   neighborhood[1] +
+  //   neighborhood[2] +
+  //   neighborhood[3] +
+  //   neighborhood[4] +
+  //   neighborhood[5]
+  // ) / 6.0f;
 }
 
 
@@ -276,8 +306,8 @@ void initOpenGL(){
   glMatrixMode(GL_PROJECTION);
 
   GLdouble matrix[16] = {
-    sqrt(3.0), 0, 0, 0,
-    sqrt(3.0)/2.0, 3.0/2.0, 0, 0,
+    3.0/2.0, 0, 0, 0,
+    sqrt(3.0)/2.0, sqrt(3.0), 0, 0,
     0, 0, 1, 0,
     0, 0, 0, 1
   };
@@ -300,7 +330,7 @@ int main(int argc, char **argv)
   //initialize automata
   for (int x = 0; x < UNIVERSE_WIDTH; ++x){
     for (int y = 0; y < UNIVERSE_HEIGHT; ++y){
-      host_univ[x][y] = thrust::complex<float>( ( rand() / float(RAND_MAX) ) - 0.5f, ( rand() / float(RAND_MAX) ) - 0.5f);
+      host_univ[x][y] = thrust::complex<float>(2.0f * (rand() / float(RAND_MAX)) - 1.0f, 2.0f * (rand() / float(RAND_MAX)) - 1.0f);
     }
   }
   
