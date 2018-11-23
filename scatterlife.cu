@@ -122,12 +122,12 @@ __global__ void runAutomata(bool direction){
   thrust::complex<float> res = 0;
 
   for (int i = 0; i < 5; ++i){
-    res += unit_vectors[i] * (4.0f/6.0f) * max(0.0f,
+    res += unit_vectors[i] * max(0.0f,
       neighborhood[(i + 3) % 6].real() * unit_vectors[i].real() + 
       neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
     );
   }
-  (*target)[x][y] = 0.5f * res + 0.5f * z;
+  (*target)[x][y] = (1.0f/3.0f) * res + (1.0f/2.0f) * z;
 
   // (*target)[x][y] = thrust::pow(z - prevZ, 2) + 0.01 *(neighborhood[0] + 
   //                           neighborhood[1] +
