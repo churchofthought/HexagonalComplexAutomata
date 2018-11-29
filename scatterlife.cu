@@ -110,26 +110,28 @@ __global__ void runAutomata(bool direction){
     (*origin) [xm1]   [y]
   };
 
-  thrust::complex<float> unit_vectors[6] = {
-    thrust::complex<float>(0.0f, 1.0f),
-    thrust::complex<float>(sqrtf(3.0f)/2.0f, 1.0f/2.0f),
-    thrust::complex<float>(sqrtf(3.0f)/2.0f, -1.0f/2.0f),
-    thrust::complex<float>(0.0f, -1.0f),
-    thrust::complex<float>(-sqrtf(3.0f)/2.0f, -1.0f/2.0f),
-    thrust::complex<float>(-sqrtf(3.0f)/2.0f, 1.0f/2.0f)
-  };
+//  thrust::complex<float> unit_vectors[6] = {
+//     thrust::complex<float>(0.0f, 1.0f),
+//     thrust::complex<float>(sqrtf(3.0f)/2.0f, 1.0f/2.0f),
+//     thrust::complex<float>(sqrtf(3.0f)/2.0f, -1.0f/2.0f),
+//     thrust::complex<float>(0.0f, -1.0f),
+//     thrust::complex<float>(-sqrtf(3.0f)/2.0f, -1.0f/2.0f),
+//     thrust::complex<float>(-sqrtf(3.0f)/2.0f, 1.0f/2.0f)
+//   };
 
-  thrust::complex<float> res = 0;
+//   thrust::complex<float> res = 0;
 
-  for (int i = 0; i < 5; ++i){
-    res += unit_vectors[i] * max(0.0f,
-      neighborhood[(i + 3) % 6].real() * unit_vectors[i].real() + 
-      neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
-    );
-  }
-  (*target)[x][y] = (1.0f/3.0f) * res + (1.0f/2.0f) * z;
+//   for (int i = 0; i < 5; ++i){
+//     res += unit_vectors[i] * max(0.0f,
+//       neighborhood[(i + 3) % 6].real() * unit_vectors[i].real() + 
+//       neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
+//     );
+//   }
+//   (*target)[x][y] = (1.0f/3.0f) * res + (1.0f/2.0f) * z;
 
-  // (*target)[x][y] = thrust::pow(z - prevZ, 2) + 0.01 *(neighborhood[0] + 
+  (*target)[x][y] = z + thrust::pow(z,0.5f);
+
+  // (*target)[x][y] = z + 0.005 * (neighborhood[0] + 
   //                           neighborhood[1] +
   //                           neighborhood[2] +
   //                           neighborhood[3] +
@@ -211,7 +213,7 @@ __global__ void rasterizeAutomata2(){
   raster[x][y] = HSLToRGB({
     0.5f + thrust::arg(z) / float(M_PI_2),
     1.0f, 
-    1.0f - powf(thrust::abs(z) / maxVal, 0.5f)
+    1.0f - powf(thrust::abs(z) / maxVal, 0.3)
   });
 }
 
@@ -295,6 +297,12 @@ void initOpenGL(){
   // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
   // glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
+
+  // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, 
+  //                GL_NEAREST);
+  // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, 
+  //                GL_NEAREST);
+
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, 
                  GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, 
@@ -334,6 +342,8 @@ int main(int argc, char **argv)
     }
   }
   
+  //host_univ[UNIVERSE_WIDTH / 2][UNIVERSE_HEIGHT / 2] = thrust::complex<float>(100.0f, 100.0f);
+
   //host_univ[UNIVERSE_WIDTH/2][UNIVERSE_HEIGHT/2] = make_cuFloatComplex(1.0, 1.0);
 
   cudaMemcpyToSymbol(univ, host_univ, sizeof(Universe), 0, cudaMemcpyHostToDevice);
@@ -354,13 +364,18 @@ int main(int argc, char **argv)
   cudaEventCreate(&start);
   cudaEventCreate(&stop);
 
+  int x = 0;
+
   /* Loop until the user closes the window */
   while (!glfwWindowShouldClose(window))
   {
-      cudaEventRecord(start);
-      runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>(true);
-      runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>(false);
-      cudaEventRecord(stop);
+
+      // if (!(++x % 20)){
+        cudaEventRecord(start);
+        runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>(true);
+        runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>(false);
+        cudaEventRecord(stop);
+      // }
 
       // rasterize
       rasterizeAutomata1<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>();
@@ -396,7 +411,5 @@ int main(int argc, char **argv)
       glfwSetWindowTitle(window, title);
 
       glfwPollEvents();
-
-      //Sleep(500);
   }
 }

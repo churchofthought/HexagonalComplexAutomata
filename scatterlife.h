@@ -1,6 +1,6 @@
 
-#define UNIVERSE_WIDTH 1024
-#define UNIVERSE_HEIGHT 1024
+#define UNIVERSE_WIDTH 256
+#define UNIVERSE_HEIGHT 256
 
 typedef float UniverseDevice[UNIVERSE_WIDTH][UNIVERSE_HEIGHT][2];
 typedef thrust::complex<float> Universe[UNIVERSE_WIDTH][UNIVERSE_HEIGHT];
