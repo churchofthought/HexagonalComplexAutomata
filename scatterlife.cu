@@ -119,19 +119,18 @@ __global__ void runAutomata(bool direction){
 //     thrust::complex<float>(-sqrtf(3.0f)/2.0f, 1.0f/2.0f)
 //   };
 
-//   thrust::complex<float> res = 0;
+  // thrust::complex<float> res = 0;
 
-//   for (int i = 0; i < 5; ++i){
-//     res += unit_vectors[i] * max(0.0f,
-//       neighborhood[(i + 3) % 6].real() * unit_vectors[i].real() + 
-//       neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
-//     );
-//   }
-//   (*target)[x][y] = (1.0f/3.0f) * res + (1.0f/2.0f) * z;
+  // for (int i = 0; i < 5; ++i){
+  //   res += unit_vectors[i] * max(0.0f,
+  //     neighborhood[(i + 3) % 6].real() * unit_vectors[i].real() + 
+  //     neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
+  //   );
+  // }
+  // (*target)[x][y] = (1.0f/3.0f) * res + (1.0f/3.0f) * z;
 
-  (*target)[x][y] = z + thrust::pow(z,0.5f);
 
-  // (*target)[x][y] = z + 0.005 * (neighborhood[0] + 
+  // (*target)[x][y] = z + 0.02 * (neighborhood[0] + 
   //                           neighborhood[1] +
   //                           neighborhood[2] +
   //                           neighborhood[3] +
@@ -139,14 +138,14 @@ __global__ void runAutomata(bool direction){
   //                           neighborhood[5]
   //                           - 6*z);
 
-  // (*target)[x][y] = (
-  //   neighborhood[0] + 
-  //   neighborhood[1] +
-  //   neighborhood[2] +
-  //   neighborhood[3] +
-  //   neighborhood[4] +
-  //   neighborhood[5]
-  // ) / 6.0f;
+  (*target)[x][y] = (
+    neighborhood[0] + 
+    neighborhood[1] +
+    neighborhood[2] +
+    neighborhood[3] +
+    neighborhood[4] +
+    neighborhood[5]
+  ) / 6.0f;
 }
 
 
@@ -213,7 +212,7 @@ __global__ void rasterizeAutomata2(){
   raster[x][y] = HSLToRGB({
     0.5f + thrust::arg(z) / float(M_PI_2),
     1.0f, 
-    1.0f - powf(thrust::abs(z) / maxVal, 0.3)
+    1.0f - powf(thrust::abs(z) / maxVal, 0.50f)
   });
 }
 
@@ -307,9 +306,9 @@ void initOpenGL(){
                  GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, 
                  GL_LINEAR);
-  GLfloat fLargest;
-  glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &fLargest);
-  glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, fLargest);
+  // GLfloat fLargest;
+  // glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &fLargest);
+  // glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, fLargest);
 
   glMatrixMode(GL_PROJECTION);
 
@@ -326,9 +325,23 @@ void initOpenGL(){
 }
 
 
+HCRYPTPROV hCryptProv;
+unsigned int randies[UNIVERSE_WIDTH][UNIVERSE_HEIGHT][2];
+
 
 int main(int argc, char **argv)
 {
+  CryptAcquireContext(
+		&hCryptProv,
+		NULL,
+		"Microsoft Base Cryptographic Provider v1.0",
+		PROV_RSA_FULL,
+		CRYPT_VERIFYCONTEXT);
+  CryptGenRandom(
+			hCryptProv,
+			sizeof(randies),
+			(BYTE*) randies);
+
   cudaDeviceProp prop;
   cudaGetDeviceProperties(&prop, 0);
   printf("  Device name: %s\n", prop.name);
@@ -338,7 +351,7 @@ int main(int argc, char **argv)
   //initialize automata
   for (int x = 0; x < UNIVERSE_WIDTH; ++x){
     for (int y = 0; y < UNIVERSE_HEIGHT; ++y){
-      host_univ[x][y] = thrust::complex<float>(2.0f * (rand() / float(RAND_MAX)) - 1.0f, 2.0f * (rand() / float(RAND_MAX)) - 1.0f);
+      host_univ[x][y] = thrust::complex<float>(2.0f * (randies[x][y][0] / float(UINT_MAX)) - 1.0f, 2.0f * (randies[x][y][1] / float(UINT_MAX)) - 1.0f);
     }
   }
   
@@ -357,24 +370,26 @@ int main(int argc, char **argv)
 
   float scale = 0.4f;
 
-  char title[128];
-  cudaEvent_t start, stop;
-  float milliseconds = 0;
+  // char title[128];
+  // cudaEvent_t start, stop;
+  // float milliseconds = 0;
 
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-
-  int x = 0;
+  // cudaEventCreate(&start);
+  // cudaEventCreate(&stop);
 
   /* Loop until the user closes the window */
+  unsigned int l = 0;
+  while (++l < 0x1FFFFF){
+     glfwPollEvents();
+  }
   while (!glfwWindowShouldClose(window))
   {
 
       // if (!(++x % 20)){
-        cudaEventRecord(start);
+        // cudaEventRecord(start);
         runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>(true);
         runAutomata<<<dim3(UNIVERSE_WIDTH, UNIVERSE_HEIGHT, 1), dim3(1,1,1)>>>(false);
-        cudaEventRecord(stop);
+        // cudaEventRecord(stop);
       // }
 
       // rasterize
@@ -405,10 +420,10 @@ int main(int argc, char **argv)
       glfwSwapBuffers(window);
 
 
-      cudaEventElapsedTime((float*)&milliseconds, start, stop);
-      sprintf(title, "%.2f executions per sec",  2000.0f / (float) milliseconds);
+      // cudaEventElapsedTime((float*)&milliseconds, start, stop);
+      // sprintf(title, "%.2f executions per sec",  2000.0f / (float) milliseconds);
 
-      glfwSetWindowTitle(window, title);
+      // glfwSetWindowTitle(window, title);
 
       glfwPollEvents();
   }
