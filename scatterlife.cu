@@ -74,6 +74,28 @@ UniImg host_raster = {};
 // 4 SW
 // 5 NW
 
+__device__ thrust::complex<float> nthDerivative(Universe* origin, unsigned int x, unsigned int y, unsigned int n){
+  if (n == 0)
+    return (*origin)[x][y];
+  
+  unsigned int xm1 = x == 0 ? (UNIVERSE_WIDTH - 1) : x-1;
+  unsigned int xp1 = x == (UNIVERSE_WIDTH - 1) ? 0 : x+1;
+
+  unsigned int ym1 = y == 0 ? (UNIVERSE_HEIGHT - 1) : y-1;
+  unsigned int yp1 = y == (UNIVERSE_HEIGHT - 1) ? 0 : y+1;
+
+  return (
+    nthDerivative(origin, x, ym1, n-1) +
+    nthDerivative(origin, xp1, ym1, n-1) +
+    nthDerivative(origin, xp1, y, n-1) +
+    nthDerivative(origin, x, yp1, n-1) +
+    nthDerivative(origin, xm1, yp1, n-1) +
+    nthDerivative(origin, xm1, y, n-1)
+    - 6.0f * nthDerivative(origin, x, y, n-1)
+  ) / 6.0f;
+}
+
+
 __global__ void runAutomata(bool direction){
 
   Universe* origin;
@@ -119,33 +141,18 @@ __global__ void runAutomata(bool direction){
 //     thrust::complex<float>(-sqrtf(3.0f)/2.0f, 1.0f/2.0f)
 //   };
 
-  // thrust::complex<float> res = 0;
+//   thrust::complex<float> res = 0;
 
-  // for (int i = 0; i < 5; ++i){
-  //   res += unit_vectors[i] * max(0.0f,
-  //     neighborhood[(i + 3) % 6].real() * unit_vectors[i].real() + 
-  //     neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
-  //   );
-  // }
-  // (*target)[x][y] = (1.0f/3.0f) * res + (1.0f/3.0f) * z;
+//   for (int i = 0; i < 5; ++i){
+//     res += unit_vectors[i] * max(0.0f,
+//       neighborhood[(i + 3) % 6].real() * unit_vectors[i].real() + 
+//       neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
+//     );
+//   }
+//   (*target)[x][y] = (1.0f/5.0f) * res + (1.0f/3.0f) * z;
 
 
-  // (*target)[x][y] = z + 0.02 * (neighborhood[0] + 
-  //                           neighborhood[1] +
-  //                           neighborhood[2] +
-  //                           neighborhood[3] +
-  //                           neighborhood[4] +
-  //                           neighborhood[5]
-  //                           - 6*z);
-
-  (*target)[x][y] = (
-    neighborhood[0] + 
-    neighborhood[1] +
-    neighborhood[2] +
-    neighborhood[3] +
-    neighborhood[4] +
-    neighborhood[5]
-  ) / 6.0f;
+  (*target)[x][y] =  z + 0.05 * nthDerivative(origin, x, y, 1);
 }
 
 
@@ -212,7 +219,7 @@ __global__ void rasterizeAutomata2(){
   raster[x][y] = HSLToRGB({
     0.5f + thrust::arg(z) / float(M_PI_2),
     1.0f, 
-    1.0f - powf(thrust::abs(z) / maxVal, 0.50f)
+    1.0f - powf(thrust::abs(z) / maxVal, 0.5f)
   });
 }
 
@@ -378,10 +385,10 @@ int main(int argc, char **argv)
   // cudaEventCreate(&stop);
 
   /* Loop until the user closes the window */
-  unsigned int l = 0;
-  while (++l < 0x1FFFFF){
-     glfwPollEvents();
-  }
+  // unsigned int l = 0;
+  // while (++l < 0x1FFFFF){
+  //    glfwPollEvents();
+  // }
   while (!glfwWindowShouldClose(window))
   {
 
