@@ -74,25 +74,14 @@ UniImg host_raster = {};
 // 4 SW
 // 5 NW
 
-__device__ thrust::complex<float> nthDerivative(Universe* origin, unsigned int x, unsigned int y, unsigned int n){
+template<int u, int v, unsigned int h>
+__device__ thrust::complex<float> nthDerivative(Universe* origin, unsigned int x, unsigned int y, unsigned int n=h, unsigned int stepsx=0, unsigned int stepsy=0){
   if (n == 0)
-    return (*origin)[x][y];
-  
-  unsigned int xm1 = x == 0 ? (UNIVERSE_WIDTH - 1) : x-1;
-  unsigned int xp1 = x == (UNIVERSE_WIDTH - 1) ? 0 : x+1;
-
-  unsigned int ym1 = y == 0 ? (UNIVERSE_HEIGHT - 1) : y-1;
-  unsigned int yp1 = y == (UNIVERSE_HEIGHT - 1) ? 0 : y+1;
+    return (*origin)[(x + stepsx/h) % UNIVERSE_WIDTH][(y + stepsy/h) % UNIVERSE_HEIGHT];
 
   return (
-    nthDerivative(origin, x, ym1, n-1) +
-    nthDerivative(origin, xp1, ym1, n-1) +
-    nthDerivative(origin, xp1, y, n-1) +
-    nthDerivative(origin, x, yp1, n-1) +
-    nthDerivative(origin, xm1, yp1, n-1) +
-    nthDerivative(origin, xm1, y, n-1)
-    - 6.0f * nthDerivative(origin, x, y, n-1)
-  ) / 6.0f;
+    nthDerivative<u,v,h>(origin, x, y, n-1, stepsx + u, stepsy + v) - nthDerivative<u,v,h>(origin, x, y, n-1, stepsx - u, stepsy - v)
+  ) / 2.0f;
 }
 
 
@@ -149,10 +138,14 @@ __global__ void runAutomata(bool direction){
 //       neighborhood[(i + 3) % 6].imag() * unit_vectors[i].imag()
 //     );
 //   }
-//   (*target)[x][y] = (1.0f/5.0f) * res + (1.0f/3.0f) * z;
+//   (*target)[x][y] = (2.0f/6.0f) * res + (3.0f/6.0f) * z;
 
+  thrust::complex<float> laplacian = 
+    +nthDerivative<+1, 0, 3>(origin,x,y)
+    +nthDerivative<0, +1, 3>(origin,x,y)
+    +nthDerivative<+1, -1, 3>(origin,x,y);
 
-  (*target)[x][y] =  z + 0.05 * nthDerivative(origin, x, y, 1);
+  (*target)[x][y] = z + 0.1 * laplacian;
 }
 
 
