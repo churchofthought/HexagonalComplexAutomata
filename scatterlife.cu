@@ -132,7 +132,7 @@ __global__ void runAutomata(bool direction){
 
   thrust::complex<float> res = 0;
 
-  for (int i = 0; i < 5; ++i){
+  for (int i = 0; i < 6; ++i){
     res += unit_vectors[i] * max(0.0f,
       neighborhood[i].real() * unit_vectors[i].real() + 
       neighborhood[i].imag() * unit_vectors[i].imag()
